@@ -1,8 +1,8 @@
-"""Export Run 3 Swin-T validation predictions using the original WS1 preprocessing.
+"""Export Run 3 Swin-T predictions for an explicitly selected original data split.
 
     uv run --with torch --with torchvision --with timm python scripts/ws2_predict_swin_val.py
 
-This performs inference only. It never changes splits, trains, or touches test images.
+This performs inference only and never changes split assignments or trains.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ def main() -> None:
     parser.add_argument("--images", type=Path, default=Path("data/ws2/prepared_v2"))
     parser.add_argument("--output", type=Path, default=Path("data/ws2/run3/swin_validation.csv"))
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--split", choices=("val", "test"), default="val")
+    parser.add_argument("--source", default=None, help="Optional exact dataset source, e.g. local")
     args = parser.parse_args()
 
     import timm
@@ -65,11 +67,13 @@ def main() -> None:
         ]
     )
     with args.predictions.open(encoding="utf-8", newline="") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["split"] == "val"]
+        rows = [row for row in csv.DictReader(handle)
+                if row["split"] == args.split
+                and (args.source is None or row["source"] == args.source)]
     if args.limit is not None:
         rows = rows[: args.limit]
     if not rows:
-        raise ValueError("No validation rows in prediction CSV")
+        raise ValueError(f"No rows for split={args.split}, source={args.source}")
     output: list[dict[str, str]] = []
     with torch.inference_mode():
         for i, row in enumerate(rows):
@@ -93,7 +97,7 @@ def main() -> None:
             }
             output.append(record)
             if (i + 1) % 100 == 0:
-                print(f"Processed {i + 1}/{len(rows)} validation images", flush=True)
+                print(f"Processed {i + 1}/{len(rows)} {args.split} images", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(output[0]))
@@ -101,7 +105,7 @@ def main() -> None:
         writer.writerows(output)
     print(
         json.dumps(
-            {"images": len(output), "output": str(args.output), "classes": classes}, indent=2
+            {"images": len(output), "split": args.split, "source": args.source, "output": str(args.output), "classes": classes}, indent=2
         )
     )
 
